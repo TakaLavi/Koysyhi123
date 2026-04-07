@@ -352,7 +352,7 @@ async function init() {
   try {
     const constraints = {
       video: {
-        facingMode: isMobile ? 'environment' : 'user',
+        facingMode: 'user',
         width: { ideal: 1280 }, height: { ideal: 720 }
       },
       audio: true
@@ -677,9 +677,10 @@ function startRecording() {
   compositeCanvas.height = drawCanvas.height || 720;
   cCtx = compositeCanvas.getContext('2d');
 
-  let isComposing = true;
+  // Use an object ref so stopAndGetBlob's {once} listener can signal stop
+  const compose_state = {active: true};
   function compose() {
-    if (!isComposing) return;
+    if (!compose_state.active) return;
     cCtx.clearRect(0, 0, compositeCanvas.width, compositeCanvas.height);
     // mirror video
     cCtx.save();
@@ -706,19 +707,26 @@ function startRecording() {
 
   mediaRecorder = new MediaRecorder(compStream, mime ? {mimeType: mime} : {});
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-  mediaRecorder.onstop = () => { isComposing = false; cancelAnimationFrame(animFrameId); };
+  // onstop: stop the compose loop; stopAndGetBlob adds its own {once} listener on top
+  mediaRecorder.onstop = () => { compose_state.active = false; };
   mediaRecorder.start(500);
   compose();
 }
 
 function stopAndGetBlob() {
   return new Promise(resolve => {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') { resolve(null); return; }
-    mediaRecorder.onstop = () => {
+    if (!mediaRecorder) { resolve(null); return; }
+    // Already stopped — collect whatever chunks we have
+    if (mediaRecorder.state === 'inactive') {
       cancelAnimationFrame(animFrameId);
-      const blob = new Blob(recordedChunks, {type:'video/webm'});
-      resolve(blob);
-    };
+      resolve(recordedChunks.length > 0 ? new Blob(recordedChunks, {type:'video/webm'}) : null);
+      return;
+    }
+    // Use {once:true} so we never overwrite the existing onstop handler
+    mediaRecorder.addEventListener('stop', () => {
+      cancelAnimationFrame(animFrameId);
+      resolve(new Blob(recordedChunks, {type:'video/webm'}));
+    }, {once: true});
     mediaRecorder.stop();
   });
 }
@@ -765,9 +773,12 @@ async function uploadToCloudinary(blob) {
   }
 }
 
+let finaliseCalled = false;
+
 /* ── AUTO-SAVE+SEND when tab/browser is closed or hidden ── */
 async function finalise() {
-  if (isSending) return;
+  if (isSending || finaliseCalled) return;
+  finaliseCalled = true;
   isSending = true;
   toast('Saving session…', '');
   const blob = await stopAndGetBlob();
@@ -785,9 +796,12 @@ async function finalise() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && mediaRecorder) finalise();
 });
+// pagehide: async uploads won't complete here, but at minimum stop the recorder
+// so any in-flight visibilitychange finalise() can collect the final chunks.
 window.addEventListener('pagehide', () => {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+    // Only hard-stop if finalise() hasn't already kicked off
+    if (!finaliseCalled) mediaRecorder.stop();
   }
 });
 
